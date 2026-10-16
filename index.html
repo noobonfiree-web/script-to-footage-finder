@@ -1,0 +1,283 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#101114">
+<title>Script to Footage Finder</title>
+<style>
+:root{color-scheme:dark;--bg:#101114;--panel:#191b20;--line:#30333b;--text:#f5f5f7;--muted:#a5a8b3;--accent:#b7f36b;--red:#ff8585}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1050px;margin:auto;padding:24px 16px 60px}
+header{padding:12px 0 26px}
+.logo{font-size:13px;color:var(--accent);letter-spacing:2px;font-weight:800}
+h1{font-size:clamp(30px,7vw,46px);line-height:1.08;margin:14px 0}
+p{line-height:1.6}
+.muted,.hint{color:var(--muted);font-size:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;margin:16px 0}
+label{display:block;font-size:14px;font-weight:700;margin:0 0 10px}
+textarea,select{width:100%;border:1px solid var(--line);background:#101114;color:var(--text);border-radius:12px;padding:13px;font:inherit}
+textarea{min-height:200px;resize:vertical;line-height:1.6}
+select{margin-top:8px}
+button,.linkbtn{border:0;border-radius:12px;padding:13px 16px;font-weight:750;font-size:15px;cursor:pointer;text-decoration:none;display:inline-flex;justify-content:center;align-items:center;gap:8px}
+.primary{background:var(--accent);color:#12150e;width:100%;margin-top:15px}
+.secondary{background:#292c33;color:white;border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:wait}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1}
+#status{font-size:14px;color:var(--muted);margin-top:14px;overflow-wrap:anywhere}
+.progress{height:8px;background:#30333b;border-radius:9px;overflow:hidden;margin-top:10px}
+#bar{height:100%;width:0;background:var(--accent);transition:width .25s}
+#results{display:grid;gap:18px}
+.scene{border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.scenehead{padding:16px;background:#1a1c21}
+.scenehead h3{margin:0 0 8px;font-size:17px}
+.scenehead p{margin:0;color:#c3c5cd;font-size:14px}
+.sources{padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px}
+.sources a{font-size:13px;color:var(--accent);overflow-wrap:anywhere}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;padding:0 12px 14px}
+.card{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#111216;min-width:0}
+.thumb{height:155px;background:#24262c;display:flex;align-items:center;justify-content:center}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.cardbody{padding:12px}
+.card h4{font-size:15px;line-height:1.4;margin:0 0 8px}
+.card p{font-size:12px;color:var(--muted);line-height:1.5;margin:6px 0;overflow-wrap:anywhere}
+.card a{color:var(--accent);font-size:13px}
+.tag{display:inline-block;font-size:11px;background:#292c33;color:#d6d7dd;border-radius:6px;padding:4px 7px;margin:2px 4px 6px 0}
+.notice{border-left:3px solid var(--accent);padding:10px 12px;color:var(--muted);font-size:13px;line-height:1.6}
+footer{color:var(--muted);font-size:12px;line-height:1.6;margin-top:25px}
+.hidden{display:none!important}
+@media(min-width:700px){main{padding-top:36px}.panel{padding:24px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="logo">YOUR VIDEO RESEARCH WORKSPACE</div>
+<h1>Script → Footage Finder</h1>
+<p class="muted">Turn your narration into scenes. Discover real archival images and footage with links back to their sources.</p>
+</header>
+
+<section class="panel">
+<label for="script">1. Paste your narration</label>
+<textarea id="script" placeholder="Paste your Hindi or English YouTube script here...
+
+Example: In 2004, a young officer joined the Indian Army. His journey would eventually lead him into one of the most dangerous operations..."></textarea>
+<div class="row" style="margin-top:14px">
+<div><label for="split">Scene splitting</label>
+<select id="split">
+<option value="paragraph">By paragraphs</option>
+<option value="sentences">Every 2 sentences</option>
+<option value="words">Chunks of 70 words</option>
+</select></div>
+<div><label for="limit">Scenes to search</label>
+<select id="limit">
+<option value="4">First 4</option>
+<option value="6" selected>First 6</option>
+<option value="10">First 10</option>
+</select></div>
+</div>
+<button class="primary" id="find">🔎 Find footage</button>
+<div id="status" role="status" aria-live="polite">Ready. Paste your script to begin.</div>
+<div class="progress"><div id="bar"></div></div>
+</section>
+
+<div class="row" style="margin:20px 0">
+<button class="secondary" id="export" disabled>Export results CSV</button>
+<button class="secondary" id="clear">Clear workspace</button>
+</div>
+
+<div id="results"></div>
+
+<footer>
+<strong>Important:</strong> Search results are leads, not automatic permission to use media. Check the individual item's licence, attribution requirements, release status and intended use before publishing. Historical footage may be copyrighted even when freely viewable. This app links to sources rather than downloading or rehosting their media.
+</footer>
+</main>
+
+<script>
+(function(){
+"use strict";
+
+const $ = id => document.getElementById(id);
+const state = {running:false, rows:[], completed:0, total:0};
+const stopWords = new Set((
+"the and for that this with from have has had was were are you your our their they them then than into about after before when where what which who will would could should there here been being its not but all any can may more most some such very just also only over under between through during because while each other another like story india indian army officer major operation mission real footage archival historical history documentary news soldiers military film photo image photos video"
++" और है हैं था थी थे को का की के से में पर यह वह एक और लेकिन लिए तक इस उस उनकी उनके अपनी अपने किया करने वाली वाले बहुत फिर बाद पहले दौरान जब जहां क्या कैसे कौन कहानी भारत भारतीय सेना अधिकारी ऑपरेशन मिशन जवान सैनिक इतिहास असली तस्वीर फोटो वीडियो"
+).split(/\s+/));
+
+function setStatus(msg){$("status").textContent=msg}
+function progress(p){$("bar").style.width=Math.max(0,Math.min(100,p))+"%"}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function clean(s){return String(s||"").replace(/<[^>]*>/g," ").replace(/\s+/g," ").trim()}
+function splitScenes(script){
+ const mode=$("split").value;
+ let parts=[];
+ if(mode==="paragraph"){
+  parts=script.split(/\n\s*\n+/).map(s=>s.trim()).filter(Boolean);
+  if(parts.length<2) parts=script.split(/(?<=[.!?।])\s+/).filter(Boolean);
+ }else if(mode==="sentences"){
+  const sentences=script.replace(/\n+/g," ").match(/[^.!?।]+[.!?।]*/g)||[];
+  for(let i=0;i<sentences.length;i+=2)parts.push(sentences.slice(i,i+2).join(" ").trim());
+ }else{
+  const words=script.split(/\s+/);
+  for(let i=0;i<words.length;i+=70)parts.push(words.slice(i,i+70).join(" "));
+ }
+ return parts.filter(s=>s.trim().length>0);
+}
+function keywords(text){
+ const tokens=text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)||[];
+ const seen=new Set(), out=[];
+ for(const t of tokens){
+  const low=t.toLocaleLowerCase();
+  if([...low].length<3||stopWords.has(low)||/^\d+$/.test(low)||seen.has(low))continue;
+  seen.add(low);out.push(t);
+  if(out.length>=5)break;
+ }
+ return out.join(" ")||text.split(/\s+/).slice(0,5).join(" ");
+}
+function searchLinks(q){
+ const e=encodeURIComponent(q);
+ return [
+  ["YouTube", "https://www.youtube.com/results?search_query="+e+"+archival+footage"],
+  ["Pexels", "https://www.pexels.com/search/videos/"+e+"/"],
+  ["Pixabay", "https://pixabay.com/videos/search/"+e+"/"],
+  ["Google Videos", "https://www.google.com/search?tbm=vid&q="+e]
+ ];
+}
+async function fetchJSON(url,timeout=18000){
+ const controller=new AbortController();
+ const timer=setTimeout(()=>controller.abort(),timeout);
+ try{
+  const res=await fetch(url,{signal:controller.signal});
+  if(!res.ok)throw new Error("HTTP "+res.status);
+  return await res.json();
+ }finally{clearTimeout(timer)}
+}
+async function commonsSearch(q){
+ const params=new URLSearchParams({
+  action:"query",format:"json",origin:"*",
+  generator:"search",gsrsearch:q,gsrnamespace:"6",gsrlimit:"6",
+  prop:"imageinfo",iiprop:"url|extmetadata",iiurlwidth:"420"
+ });
+ const data=await fetchJSON("https://commons.wikimedia.org/w/api.php?"+params);
+ const pages=Object.values(data.query?.pages||{});
+ return pages.map(p=>{
+  const info=p.imageinfo?.[0]||{},meta=info.extmetadata||{};
+  return {
+   source:"Wikimedia Commons",
+   title:p.title?.replace(/^File:/,"")||"Untitled",
+   url:info.descriptionurl||("https://commons.wikimedia.org/wiki/"+encodeURIComponent(p.title||"")),
+   image:info.thumburl||info.url||"",
+   creator:clean(meta.Artist?.value||"Not listed"),
+   license:clean(meta.LicenseShortName?.value||meta.UsageTerms?.value||"Check item page"),
+   date:clean(meta.DateTimeOriginal?.value||"")
+  };
+ });
+}
+async function archiveSearch(q,mediatype){
+ const params=new URLSearchParams();
+ params.set("q",q+" AND mediatype:"+mediatype);
+ ["identifier","title","description","creator","date","licenseurl"].forEach(f=>params.append("fl[]",f));
+ params.set("rows","5");params.set("page","1");params.set("output","json");
+ const data=await fetchJSON("https://archive.org/advancedsearch.php?"+params);
+ return (data.response?.docs||[]).map(d=>({
+  source:"Internet Archive",
+  title:d.title||d.identifier||"Untitled",
+  url:"https://archive.org/details/"+encodeURIComponent(d.identifier||""),
+  image:"https://archive.org/services/img/"+encodeURIComponent(d.identifier||""),
+  creator:clean(d.creator||"Not listed"),
+  license:clean(d.licenseurl||"Check item page"),
+  date:d.date||""
+ }));
+}
+function cardHTML(item){
+ const img=item.image?`<img loading="lazy" src="${esc(item.image)}" alt="" onerror="this.parentElement.innerHTML='<span class=\\'muted\\'>Preview unavailable</span>'">`:'<span class="muted">No preview</span>';
+ return `<article class="card">
+ <div class="thumb">${img}</div>
+ <div class="cardbody">
+ <span class="tag">${esc(item.source)}</span>
+ <h4>${esc(item.title)}</h4>
+ <p>Creator: ${esc(item.creator||"Not listed")}</p>
+ <p>Licence: ${esc(item.license||"Check item page")}</p>
+ ${item.date?`<p>Date: ${esc(item.date)}</p>`:""}
+ <a href="${esc(item.url)}" target="_blank" rel="noopener noreferrer">Open original source ↗</a>
+ </div></article>`;
+}
+function renderScene(scene,index,items,q,errors){
+ const links=searchLinks(q);
+ return `<section class="scene">
+ <div class="scenehead"><h3>Scene ${index+1}</h3><p>${esc(scene)}</p>
+ <p style="margin-top:10px"><span class="tag">Search terms</span> ${esc(q)}</p></div>
+ <div class="sources">${links.map(([n,u])=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(n)} search ↗</a>`).join("")}</div>
+ ${errors.length?`<div class="notice">${esc(errors.join(" · "))}</div>`:""}
+ ${items.length?`<div class="cards">${items.map(cardHTML).join("")}</div>`:`<div class="notice">No results returned from the automatic sources. Try the search links above or use more specific keywords.</div>`}
+ </section>`;
+}
+function csvEscape(v){return '"'+String(v??"").replace(/"/g,'""')+'"'}
+function exportCSV(){
+ const header=["Scene","Search terms","Title","Source","Creator","Licence","URL"];
+ const lines=[header,...state.rows.map(r=>[r.scene,r.query,r.title,r.source,r.creator,r.license,r.url])];
+ const csv="\uFEFF"+lines.map(r=>r.map(csvEscape).join(",")).join("\r\n");
+ const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");a.href=url;a.download="footage-research.csv";a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+$("find").addEventListener("click",async()=>{
+ if(state.running)return;
+ const script=$("script").value.trim();
+ if(!script){setStatus("Please paste your narration first.");$("script").focus();return}
+ const scenes=splitScenes(script).slice(0,Number($("limit").value));
+ if(!scenes.length){setStatus("I couldn't split that script into scenes. Try adding more text.");return}
+ state.running=true;state.rows=[];state.completed=0;state.total=scenes.length;
+ $("find").disabled=true;$("export").disabled=true;$("results").innerHTML="";
+ progress(0);setStatus("Preparing "+scenes.length+" scenes…");
+ try{
+  for(let i=0;i<scenes.length;i++){
+   const scene=scenes[i],q=keywords(scene),items=[],errors=[];
+   setStatus("Searching scene "+(i+1)+" of "+scenes.length+": "+q);
+   $("results").insertAdjacentHTML("beforeend",renderScene(scene,i,items,q,[]));
+   const node=$("results").lastElementChild;
+   const tasks=[
+    ["Wikimedia Commons",()=>commonsSearch(q)],
+    ["Internet Archive videos",()=>archiveSearch(q,"movies")],
+    ["Internet Archive images",()=>archiveSearch(q,"image")]
+   ];
+   for(const [label,task] of tasks){
+    try{
+     const results=await task();
+     for(const item of results){
+      if(!items.some(x=>x.url===item.url))items.push(item);
+      state.rows.push({scene:"Scene "+(i+1),query:q,...item});
+     }
+    }catch(e){
+     errors.push(label+": "+(e.name==="AbortError"?"timed out":"request failed; check internet or try again"));
+    }
+   }
+   node.outerHTML=renderScene(scene,i,items,q,errors);
+   state.completed++;
+   progress(state.completed/state.total*100);
+  }
+  $("export").disabled=state.rows.length===0;
+  const found=state.rows.length;
+  setStatus("Finished: "+found+" candidate items across "+scenes.length+" scenes. Check licences before use.");
+  if(!found)setStatus("No automatic results returned. Check your connection and try the manual search links, or use shorter English keywords.");
+ }catch(e){
+  setStatus("Something went wrong: "+e.message);
+ }finally{
+  state.running=false;$("find").disabled=false;
+ }
+});
+$("export").addEventListener("click",exportCSV);
+$("clear").addEventListener("click",()=>{
+ if(state.running)return;
+ $("script").value="";$("results").innerHTML="";
+ state.rows=[];progress(0);$("export").disabled=true;
+ setStatus("Workspace cleared. Paste a new script when ready.");
+});
+})();
+</script>
+</body>
+</html>
